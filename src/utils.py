@@ -7,9 +7,6 @@ from LLDBHost import LLDBHost
 
 
 def readfd(fd: int, blocking: bool = False) -> Optional[str]:
-    time.sleep(
-        0.1
-    )  # FIXME: to be safe this is needed, but we should do this asynchronously
     block = True
     while block:
         try:

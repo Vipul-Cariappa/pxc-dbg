@@ -5,6 +5,7 @@ import time
 from typing import NoReturn
 
 from LLDBHost import LLDBHost
+from IOManager import IOManager
 
 
 # Setup logging
@@ -24,50 +25,37 @@ else:
 
 
 def pxc_start(args: list[str]) -> NoReturn:
-    lldb_host = LLDBHost(sys.executable, args)
+    io_manager = IOManager("(px-dbg) > ")
+    io_manager.start()
+    lldb_host = LLDBHost(sys.executable, io_manager, args)
 
     while True:
-        # FIXME: sleep is required for I/O purposes, but this should be done asynchronously
-        time.sleep(0.25)
+        command = io_manager.read()
+        while command is None:
+            time.sleep(0.25)
+            command = io_manager.read()
 
-        stdout = lldb_host.get_stdout()
-        if stdout:
-            if stdout.endswith("(Pdb) "):
-                print(stdout[:-6])
-            else:
-                print(stdout)
-        stderr = lldb_host.get_stderr()
-        if stderr:
-            print(stderr, file=sys.stderr)
-
-        if lldb_host.is_stopped():
-            output, result = lldb_host.execute("process status")
-            if output:
-                file = sys.stderr if not result else sys.stdout
-                print(output, file=file)
-
-        command = input("(pxc-dbg) > ")
         if command.startswith("py "):
             actual_command = command[3:]
-            logger.debug(f"Sending command to child: {actual_command}")
+            logger.debug(f"Sending command to pdb: {actual_command}")
             lldb_host.set_stdin(actual_command + "\n")
 
         elif command.startswith("c "):
             actual_command = command[2:]
-            output, result = lldb_host.execute(actual_command)
+            output, _ = lldb_host.execute(actual_command)
             if output:
-                file = sys.stderr if not result else sys.stdout
-                print(output, file=file)
+                io_manager.write(output)
 
         elif command == "exit" or command == "quit" or command == "q":
             lldb_host.stop_events_handler()
+            io_manager.stop()
             exit(0)
 
         elif command == "":
-            pass
+            io_manager.write("")
 
         else:
-            print("Unknown Command", file=sys.stderr)
+            io_manager.write("Unknown Command")
 
 
 def main() -> NoReturn:
