@@ -249,3 +249,6 @@ pyrightconfig.json
 
 .vscode/
 .cache/
+tmp/
+compile_commands.json
+testlib/setup.cfg
