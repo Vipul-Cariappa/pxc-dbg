@@ -1,3 +1,4 @@
+import os
 import logging
 import lldb
 from threading import Thread
@@ -10,13 +11,13 @@ class LLDBException(Exception):
 
 
 class LLDBEventHandler(Thread):
-    def __init__(self, debugger: lldb.SBDebugger):
+    def __init__(self, debugger: "LLDBHost"):
         super().__init__()
-        self.debugger = debugger
+        self.debugger_host = debugger
         self.stop_event_handler = False
 
     def run(self):
-        listener = self.debugger.GetListener()
+        listener = self.debugger_host.debugger.GetListener()
         event = lldb.SBEvent()
         while not self.stop_event_handler:
             if listener.WaitForEvent(1, event):
@@ -27,29 +28,38 @@ class LLDBEventHandler(Thread):
 
 
 class LLDBHost:
-    def __init__(self, pid: int):
+    def __init__(self, exe: str, args: list[str] = []):
         logger.debug("Creating lldb instance")
-        self.pid = pid
+        self.exe = exe
+        self.args = args
         self.debugger = lldb.SBDebugger.Create()
         self.debugger.SetAsync(True)
         self.debugger.SetUseColor(True)
 
         self.command_interpreter = self.debugger.GetCommandInterpreter()
 
-        logger.debug(f"Attaching to {pid}")
-        output, result = self.execute(f"attach -p {pid}")
-        if not result:
-            raise LLDBException(f"Failed to attach to {pid}:\n{output}")
+        logger.debug(f"Creating target for {self.exe}")
+        self.target = self.debugger.CreateTarget(self.exe)
 
-        # continue execution. attaching stops execution
-        output, result = self.execute(f"c")
-        if not result:
-            raise LLDBException(f"Failed to continue{pid}:\n{output}")
+        logger.debug(f"Launching process for {self.exe} with args {self.args}")
+        self.process = self.target.LaunchSimple(self.args, None, os.getcwd())
 
         self.start_events_handler()
 
+    def get_stdout(self) -> str:
+        return self.process.GetSTDOUT(1024 * 1024 * 10)
+
+    def get_stderr(self) -> str:
+        return self.process.GetSTDERR(1024 * 1024 * 10)
+
+    def set_stdin(self, data: str) -> None:
+        self.process.PutSTDIN(data)
+
+    def is_stopped(self) -> bool:
+        return self.process.GetState() == lldb.eStateStopped
+
     def start_events_handler(self):
-        self.events_handler = LLDBEventHandler(self.debugger)
+        self.events_handler = LLDBEventHandler(self)
         self.events_handler.start()
 
     def stop_events_handler(self):

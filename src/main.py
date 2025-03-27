@@ -1,11 +1,9 @@
 import logging
 import os
 import sys
-import pty
+import time
 from typing import NoReturn
-from pdb import __file__ as pdb_file
 
-from utils import readfd
 from LLDBHost import LLDBHost
 
 
@@ -25,24 +23,32 @@ else:
     logging.basicConfig(level=log_level)
 
 
-def master(pid: int, fd: int) -> NoReturn:
-    os.set_blocking(fd, False)
-
-    lldb_host = LLDBHost(pid)
+def pxc_start(args: list[str]) -> NoReturn:
+    lldb_host = LLDBHost(sys.executable, args)
 
     while True:
-        result = readfd(fd)
-        if result:
-            if result.endswith("(Pdb) "):
-                print(result[:-6])
+        time.sleep(0.25) # FIXME: sleep is required for I/O purposes, but this should be done asynchronously
+        stdout = lldb_host.get_stdout()
+        if stdout:
+            if stdout.endswith("(Pdb) "):
+                print(stdout[:-6])
             else:
-                print(result)
+                print(stdout)
+        stderr = lldb_host.get_stderr()
+        if stderr:
+            print(stderr, file=sys.stderr)
+
+        if lldb_host.is_stopped():
+            output, result = lldb_host.execute("process status")
+            if output:
+                file = sys.stderr if not result else sys.stdout
+                print(output, file=file)
 
         command = input("(pxc-dbg) > ")
         if command.startswith("py "):
             actual_command = command[3:]
             logger.debug(f"Sending command to child: {actual_command}")
-            os.write(fd, (actual_command + "\n").encode())
+            lldb_host.set_stdin(actual_command + "\n")
 
         elif command.startswith("c "):
             actual_command = command[2:]
@@ -52,7 +58,6 @@ def master(pid: int, fd: int) -> NoReturn:
                 print(output, file=file)
 
         elif command == "exit" or command == "quit" or command == "q":
-            os.write(fd, "exit\n".encode())
             lldb_host.stop_events_handler()
             exit(0)
 
@@ -63,25 +68,12 @@ def master(pid: int, fd: int) -> NoReturn:
             print("Unknown Command", file=sys.stderr)
 
 
-def child(args: list[str]) -> NoReturn:
-    args = ["-m", pdb_file] + args
-    logger.debug(f"Executing child process: {sys.executable} {args}")
-    os.execvp(sys.executable, args)
-
-
 def main() -> NoReturn:
     if len(sys.argv) <= 1:  # ???: Might need to update to work as a module
         print("Expected at least one argument", file=sys.stderr)
         exit(1)
 
-    logger.debug("Forking")
-    pid, fd = pty.fork()
-    if pid == 0:
-        logger.debug(f"Child process starting: {os.getpid()}")
-        child(sys.argv[1:])
-    else:
-        logger.debug(f"Parent process starting: {os.getpid()} child is {pid}")
-        master(pid, fd)
+    pxc_start(["-m", "pdb"] + sys.argv[1:])
 
 
 if __name__ == "__main__":
