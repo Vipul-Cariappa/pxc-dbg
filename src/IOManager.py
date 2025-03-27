@@ -13,8 +13,7 @@ io_lock = Lock()
 class IOManager:
     def __init__(self, prompt: str = ">>> "):
         self.prompt = prompt
-        self.backspace = "\b" * len(prompt)
-        self.replace_blank = self.backspace + " " * (len(prompt) - 1)
+        self.replace_blank = "\b" * len(prompt) + " " * len(prompt)
 
     def start(self):
         with io_lock:
@@ -29,7 +28,7 @@ class IOManager:
             logger.debug(f"Write: {data}")
             print(
                 self.replace_blank,
-                self.backspace,
+                "\r",
                 data[:-6] if data.endswith("(Pdb) ") else data,
                 "\n",
                 self.prompt if prompt else "",
