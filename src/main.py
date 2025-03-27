@@ -27,7 +27,9 @@ def pxc_start(args: list[str]) -> NoReturn:
     lldb_host = LLDBHost(sys.executable, args)
 
     while True:
-        time.sleep(0.25) # FIXME: sleep is required for I/O purposes, but this should be done asynchronously
+        # FIXME: sleep is required for I/O purposes, but this should be done asynchronously
+        time.sleep(0.25)
+
         stdout = lldb_host.get_stdout()
         if stdout:
             if stdout.endswith("(Pdb) "):
