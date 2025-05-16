@@ -82,3 +82,12 @@ class PXC:
             self.lldb_host.set_stdin(
                 'exec("from collections import deque; print(); deque((print(f\\"{k} = {v}\\") for k, v in locals().items() if ((not k.startswith(\\"_\\"))) and (k != \\"deque\\")), maxlen=1) and None")\n'
             )
+
+    def print_backtrace(self) -> None:
+        if self.lldb_host.is_stopped():
+            output, _ = self.lldb_host.execute(
+                f"bt"
+            )
+            self.io_manager.write(output)
+        else:
+            self.lldb_host.set_stdin(f"bt\n")
