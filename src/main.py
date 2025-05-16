@@ -31,6 +31,7 @@ HELP_TEXT = """\
     (n)ext: steps over current line of code
     (s)tep: steps into the function
     (c)ontinue: continue execution until next breakpoint is reached
+    (v)ars: print all local variables
     (p)rint <variable>: prints the value of the variable
     (pp)rint <variable>: pretty prints the value of the variable
     pdb <command ...>: sends command to pdb session
@@ -65,6 +66,10 @@ def pxc_start(args: list[str]) -> NoReturn:
         # handle help
         elif command == "h" or command == "help":
             io_manager.write(HELP_TEXT)
+
+        # handle step over
+        elif command == "v" or command == "vars":
+            pxc.print_variables()
 
         # handle breakpoints
         elif command.startswith("b "):
