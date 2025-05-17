@@ -90,6 +90,10 @@ class LLDBHost:
         self.events_handler.stop_event_handler = True
         self.events_handler.join()
 
+    def stop(self):
+        self.stop_events_handler()
+        self.process.Destroy()
+
     def execute(self, command: str) -> tuple[str, bool]:
         """
         Executes the given command.
