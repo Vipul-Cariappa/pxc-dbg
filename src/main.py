@@ -15,6 +15,10 @@ from IOManager import IOManager
 HOST = "127.0.0.1"
 PORT = 30_000
 pipe = ...
+sock = ...
+stepping_in = False  # ???: Do you need a lock?
+ControlFlowLock = threading.Lock()
+stepping_in_breakpoints = []
 
 # Setup logging
 logger = logging.getLogger("pyc-dbg")
@@ -51,7 +55,7 @@ pxc = ...
 
 
 def pxc_start(args: list[str]) -> NoReturn:
-    global pxc, pipe
+    global pxc, stepping_in
     io_manager = IOManager("(px-dbg) > ")
     io_manager.start()
     lldb_host = LLDBHost(sys.executable, io_manager, args)
@@ -63,8 +67,10 @@ def pxc_start(args: list[str]) -> NoReturn:
             time.sleep(0)
             command = io_manager.read()
 
-        if pipe != Ellipsis:
-            pipe.send(pickle.dumps(False))
+        stepping_in = False
+        for _ in range(len(stepping_in_breakpoints)):
+            i = stepping_in_breakpoints.pop()
+            lldb_host.execute(f"br del {i}")
 
         if command.startswith("pdb "):
             actual_command = command[4:]
@@ -108,10 +114,7 @@ def pxc_start(args: list[str]) -> NoReturn:
 
         # handle step in
         elif command == "s" or command == "step":
-            if pipe != Ellipsis:
-                pipe.send(
-                    pickle.dumps(True)
-                )  # ???: should be done after checking lldb_host.is_stopped()
+            stepping_in = True
             pxc.step_in()
 
         # handle continue
@@ -131,8 +134,6 @@ def pxc_start(args: list[str]) -> NoReturn:
             pxc.pprint_variable(command[7:].strip())
 
         elif command == "exit" or command == "quit":
-            if pipe != Ellipsis:
-                pipe.send(pickle.dumps(None))
             lldb_host.set_stdin("exit" + "\n")
             lldb_host.stop()
             io_manager.stop()
@@ -147,31 +148,51 @@ def pxc_start(args: list[str]) -> NoReturn:
         pxc.process_python_command_queue()
 
 
-def connect_debugee():
-    global pipe
+def start_controller_server():
+    global pipe, sock, stepping_in
+    ControlFlowLock.acquire()
     with socket.socket() as s:
-        while True:
-            try:
-                s.connect((HOST, PORT))
-            except ConnectionRefusedError as e:
-                time.sleep(0)
-            else:
-                logger.debug(f"Connection to debugee successful")
-                break
-        pipe = s
-        while True:
-            try:
-                data = s.recv(1024 * 4)
+        sock = s
+
+        logger.debug("Starting socket")
+        s.bind((HOST, PORT))
+        s.listen(1)
+
+        ControlFlowLock.release()
+
+        conn, addr = s.accept()
+        logger.debug(f"Connected to {addr}")
+        with conn:
+            pipe = conn
+
+            while True:
+                data = conn.recv(1024 * 1024)
                 if not data:
                     break
-                data = pickle.loads(data)
-                logger.debug(f"Data received from debugee server: {data}")
-                fn_loc = data[-1] + 16 + 8
-                logger.debug(f"Setting a break point at {fn_loc}")
-                pxc.lldb_host.execute(f"b *{hex(fn_loc)}")
 
-            except ConnectionResetError:
-                break
+                data = pickle.loads(data)
+                logger.debug(f"Received: {data}")
+                if data is None:
+                    break
+
+                event, fn_name, fn_addr = data
+                if event == "c_call":
+                    # FIXME: move to separate function
+                    if stepping_in:
+                        logger.debug(f"Setting a break point at {hex(fn_addr)}")
+                        result, _ = pxc.lldb_host.execute(f"b *{hex(fn_addr)}")
+                        # parsing lldb output to get breakpoint number
+                        # this breakpoint need to be removed later because
+                        # we are stepping-in
+                        if result.startswith("Breakpoint "):
+                            stepping_in_breakpoints.append(
+                                int(result[11 : result.find(":")])
+                            )
+                    conn.send(pickle.dumps(True))
+
+        pipe = None
+    sock = None
+    logger.debug("Ending Socket Server")
 
 
 def main() -> NoReturn:
@@ -179,18 +200,19 @@ def main() -> NoReturn:
         print("Expected at least one argument", file=sys.stderr)
         exit(1)
 
-    debugee_server = threading.Thread(target=connect_debugee)
-    logger.debug(f"Starting connection to debugee")
-    debugee_server.start()
+    controller_server = threading.Thread(target=start_controller_server)
+    logger.debug(f"Starting connection to debugger")
+    controller_server.start()
 
     from pathlib import Path
 
     dir_loc = Path(__file__).parent
     pxc_module_path = dir_loc / "pxcdb.py"
-    pxc_start([str(pxc_module_path), *sys.argv[1:]])
+    with ControlFlowLock:
+        pxc_start([str(pxc_module_path), *sys.argv[1:]])
 
-    debugee_server.join()
-    logger.debug("Exiting safely")
+    controller_server.join()
+    logger.debug("Exiting Safely")
 
 
 if __name__ == "__main__":
