@@ -28,6 +28,9 @@ static PyObject *resolve_location(PyObject *self, PyObject *args) {
     if (!PyArg_ParseTuple(args, "sO", &name, &func))
         return NULL;
 
+    if (PyCFunction_Check(func))
+        return PyLong_FromVoidPtr(PyCFunction_GET_FUNCTION(func));
+
     int flags = PyCFunction_GET_FLAGS(func);
     if (!(flags & METH_VARARGS)) {
         Py_ssize_t offset = Py_TYPE(func)->tp_vectorcall_offset;
@@ -39,6 +42,5 @@ static PyObject *resolve_location(PyObject *self, PyObject *args) {
         return PyLong_FromVoidPtr(func_addr);
     }
 
-    PyCFunction meth = PyCFunction_GET_FUNCTION(func);
-    return PyLong_FromVoidPtr(meth);
+    return PyLong_FromLong(0);
 }
