@@ -8,15 +8,16 @@ import threading
 import pickle
 import time
 
+from pxc_extension import resolve_location
+
 
 HOST = "127.0.0.1"
 PORT = 30_000
 pipe = ...
-intercept_c_call = False
 
 
 # Setup logging
-logger = logging.getLogger("pyc-debugee")
+logger = logging.getLogger("pyc-debugger")
 log_level = {
     "DEBUG": logging.DEBUG,
     "INFO": logging.INFO,
@@ -24,7 +25,7 @@ log_level = {
     "ERROR": logging.ERROR,
     "CRITICAL": logging.CRITICAL,
 }[os.getenv("LOG_LEVEL", "CRITICAL")]
-log_file = os.getenv("LOG_FILE_DEBUGEE", None)
+log_file = os.getenv("LOG_FILE_DEBUGGER", None)
 if log_file:
     logging.basicConfig(level=log_level, filename=log_file)
 else:
@@ -45,27 +46,44 @@ class PSXDB(Pdb):
         sys.setprofile(self.cfunction_dispatch_handler)
 
     def cfunction_dispatch_handler(self, frame, event, arg):
-        if pipe == Ellipsis:
-            return self.cfunction_dispatch_handler
-
-        if event == "c_call" and intercept_c_call:
-            logger.debug("Sending c_call")
-            pipe.send(pickle.dumps(("c_call", arg.__name__, id(arg))))
+        if event == "c_call":
+            logger.debug(
+                f"cfunction_dispatch_handler: {event = } name = {arg.__name__}"
+            )
+            pipe.send(
+                pickle.dumps(
+                    ("c_call", arg.__name__, resolve_location(arg.__name__, arg))
+                )
+            )
             # TODO: A C helper function is required here doing what
             #       CPython's cfunction_call function does but it should
             #       return the function pointer instead.
             #       Along with the arg.__name__ this might be able to
             #       search the appropriate address when overloads like
             #       __add__ or __getitem__ need to be stepped into
-            time.sleep(
-                1
-            )  # TODO: wait till you receive something from the controller process
-        elif event == "c_return" and intercept_c_call:
-            logger.debug("Sending c_return")
-            pipe.send(pickle.dumps(("c_return", arg.__name__, id(arg))))
-        elif event == "c_exception" and intercept_c_call:
-            logger.debug("Sending c_exception")
-            pipe.send(pickle.dumps(("c_exception", arg.__name__, id(arg))))
+
+            # pipe.recv will wait till the breakpoint is set if required
+            assert pickle.loads(pipe.recv(1024)) == True
+
+        elif event == "c_return":
+            logger.debug(
+                f"cfunction_dispatch_handler: {event = } name = {arg.__name__}"
+            )
+            pipe.send(
+                pickle.dumps(
+                    ("c_return", arg.__name__, resolve_location(arg.__name__, arg))
+                )
+            )
+
+        elif event == "c_exception":
+            logger.debug(
+                f"cfunction_dispatch_handler: {event = } name = {arg.__name__}"
+            )
+            pipe.send(
+                pickle.dumps(
+                    ("c_exception", arg.__name__, resolve_location(arg.__name__, arg))
+                )
+            )
 
         return self.cfunction_dispatch_handler
 
@@ -125,36 +143,17 @@ def start_debugger():
 
 
 def start_debugger_server():
-    # TODO: don't listen here, thereby eliminating the use of threads
-    global intercept_c_call, pipe
-    with socket.socket() as s:
-        logging.debug("Starting socket")
-        s.bind((HOST, PORT))
-        s.listen(1)
-        conn, addr = s.accept()
-        logger.debug(f"Connected to {addr}")
-        with conn:
-            pipe = conn
-            while True:
-                data = conn.recv(1024 * 4)
-                if not data:
-                    time.sleep(0)
-                    continue
-                intercept_c_call = pickle.loads(data)
-                logger.debug(f"Received: {intercept_c_call}")
-                if intercept_c_call is None:
-                    break
-        pipe = None
-    logger.debug("Ending")
+    global pipe
+    logger.debug("Starting socket")
+    pipe = socket.socket()
+
+    logger.debug("Connecting to controller")
+    pipe.connect((HOST, PORT))
 
 
 def main():
-    debugger_server = threading.Thread(target=start_debugger_server)
-    logger.debug("Starting thread")
-    debugger_server.start()
-
+    start_debugger_server()
     start_debugger()
-    debugger_server.join()
     logger.debug("Exiting safely")
 
 
