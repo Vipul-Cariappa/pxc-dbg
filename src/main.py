@@ -179,14 +179,19 @@ def start_controller_server():
                 if event == "c_call":
                     # FIXME: move to separate function
                     if stepping_in:
-                        logger.debug(f"Setting a break point at {hex(fn_addr)}")
-                        result, _ = pxc.lldb_host.execute(f"b *{hex(fn_addr)}")
-                        # parsing lldb output to get breakpoint number
-                        # this breakpoint need to be removed later because
-                        # we are stepping-in
-                        if result.startswith("Breakpoint "):
-                            stepping_in_breakpoints.append(
-                                int(result[11 : result.find(":")])
+                        if fn_addr:
+                            logger.debug(f"Setting a break point at {hex(fn_addr)}")
+                            result, _ = pxc.lldb_host.execute(f"b *{hex(fn_addr)}")
+                            # parsing lldb output to get breakpoint number
+                            # this breakpoint need to be removed later because
+                            # we are stepping-in
+                            if result.startswith("Breakpoint "):
+                                stepping_in_breakpoints.append(
+                                    int(result[11 : result.find(":")])
+                                )
+                        else:
+                            logger.debug(
+                                f"Should be stepping in but pointer for {fn_name} is NULL"
                             )
                     conn.send(pickle.dumps(True))
 
