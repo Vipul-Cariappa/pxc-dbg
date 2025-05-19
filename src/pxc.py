@@ -60,7 +60,7 @@ class PXC:
     def pprint_variable(self, variable: str) -> None:
         if self.lldb_host.is_stopped():
             output, _ = self.lldb_host.execute(
-                f"expr PyUnicode_AsUTF8((PyObject*)PyObject_Str((PyObject*)({variable})))"
+                f"expr (char*)PyUnicode_AsUTF8((PyObject*)PyObject_Str((PyObject*)({variable})))"
             )
             self.io_manager.write(output)
         else:
